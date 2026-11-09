@@ -43,13 +43,15 @@ jobs:
           cp -f "/tmp/$NAME" /tmp/x/
           cp -f /tmp/x/* /tmp/pkg/
           cd /tmp
-          makeself --gzip /tmp/pkg "/tmp/$SRC.new" "luci-app-dead 24.10 x86_64" ./install.sh
-          ls -la "/tmp/$SRC.new"
+          OUT="/tmp/$(basename "$SRC").new"
+          rm -f "$OUT"
+          makeself --gzip /tmp/pkg "$OUT" "luci-app-dead 24.10 x86_64" ./install.sh
+          ls -la "$OUT"
 
           cd "$GITHUB_WORKSPACE"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          cp -f "/tmp/$SRC.new" "$SRC"
+          cp -f "$OUT" "$SRC"
           git add -A "$SRC"
           if git diff --cached --quiet; then echo "无变化"; exit 0; fi
           git commit -m "feat(store): 24.10 daed 同步上游 $TAG ($NAME)"
