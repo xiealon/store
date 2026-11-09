@@ -1,0 +1,56 @@
+name: Sync daed into 24.10 run
+# 从 kenzok8/openwrt-daede 最新 release 取 24.10 的 daed ipk，
+# 替换 run/x86/24-luci-app-dead_1.28-x86-64.run 里的旧 daed，重打后提交。
+# 全程 GitHub 内部网络。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '35 18 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install makeself
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq makeself
+
+      - name: Pull upstream daed ipk and repack
+        run: |
+          set -euo pipefail
+          API=https://api.github.com/repos/kenzok8/openwrt-daede/releases
+          TAG=$(curl -fsSL "$API?per_page=10" \
+                | jq -r 'map(select(.prerelease==false))|sort_by(.published_at)|last|.tag_name')
+          echo "upstream tag = $TAG"
+          curl -fsSL "$API/tags/$TAG" > /tmp/rel.json
+          URL=$(jq -r '.assets[].browser_download_url' /tmp/rel.json \
+                | grep -E '/daed_[0-9.]+-r[0-9]+_x86_64\.ipk$' | head -n1)
+          [ -n "$URL" ] || { echo "::error::上游没有 x86_64 daed ipk"; exit 1; }
+          NAME=$(basename "$URL")
+          echo "new ipk = $NAME"
+          curl -fsSL -o "/tmp/$NAME" "$URL"
+          echo "size = $(stat -c%s "/tmp/$NAME") B"
+
+          SRC=run/x86/24-luci-app-dead_1.28-x86-64.run
+          rm -rf /tmp/x /tmp/pkg && mkdir -p /tmp/x /tmp/pkg
+          sh "$SRC" --target /tmp/x --noexec
+          echo "---- 原包内容 ----"; ls -la /tmp/x
+          rm -f /tmp/x/daed_*.ipk
+          cp -f "/tmp/$NAME" /tmp/x/
+          cp -f /tmp/x/* /tmp/pkg/
+          cd /tmp
+          makeself --gzip /tmp/pkg "/tmp/$SRC.new" "luci-app-dead 24.10 x86_64" ./install.sh
+          ls -la "/tmp/$SRC.new"
+
+          cd "$GITHUB_WORKSPACE"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp -f "/tmp/$SRC.new" "$SRC"
+          git add -A "$SRC"
+          if git diff --cached --quiet; then echo "无变化"; exit 0; fi
+          git commit -m "feat(store): 24.10 daed 同步上游 $TAG ($NAME)"
+          git push
